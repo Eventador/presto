@@ -22,6 +22,10 @@ import com.google.common.collect.ImmutableSet;
 import io.airlift.json.JsonCodec;
 import io.airlift.log.Logger;
 
+import kafka.utils.ZKStringSerializer$;
+import org.I0Itec.zkclient.ZkClient;
+import org.apache.kafka.common.PartitionInfo;
+
 import javax.inject.Inject;
 
 import java.io.File;
@@ -44,7 +48,8 @@ public class KafkaTableDescriptionSupplier
     private final JsonCodec<KafkaTopicDescription> topicDescriptionCodec;
     private final File tableDescriptionDir;
     private final String defaultSchema;
-    private final Set<String> tableNames;
+    private final String zkNodes;
+    private Set<String> tableNames;
 
     @Inject
     KafkaTableDescriptionSupplier(KafkaConnectorConfig kafkaConnectorConfig,
@@ -55,12 +60,27 @@ public class KafkaTableDescriptionSupplier
         requireNonNull(kafkaConnectorConfig, "kafkaConfig is null");
         this.tableDescriptionDir = kafkaConnectorConfig.getTableDescriptionDir();
         this.defaultSchema = kafkaConnectorConfig.getDefaultSchema();
-        this.tableNames = ImmutableSet.copyOf(kafkaConnectorConfig.getTableNames());
+        this.zkNodes = kafkaConnectorConfig.getZkNodes();
     }
 
     @Override
     public Map<SchemaTableName, KafkaTopicDescription> get()
     {
+        // First, retrieve topics list from Zookeeper
+        log.debug("Connecting to Zookeeper, using nodeset: %s", zkNodes);
+        ZkClient zkClient = new ZkClient(zkNodes, 30000, 30000, ZKStringSerializer$.MODULE$);
+
+        List<String> kafkaTopicsFromZk;
+        try {
+            kafkaTopicsFromZk = zkClient.getChildren("/brokers/topics");
+        }
+        finally {
+            zkClient.close();
+        }
+
+        this.tableNames = ImmutableSet.copyOf(kafkaTopicsFromZk);
+
+        // Now get JSON definitions
         ImmutableMap.Builder<SchemaTableName, KafkaTopicDescription> builder = ImmutableMap.builder();
 
         log.debug("Loading kafka table definitions from %s", tableDescriptionDir.getAbsolutePath());

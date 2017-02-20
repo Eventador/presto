@@ -33,6 +33,10 @@ import static com.google.common.collect.Iterables.transform;
 public class KafkaConnectorConfig
 {
     private static final int KAFKA_DEFAULT_PORT = 9092;
+    /**
+     * Seed nodes for Zookeeper cluster. At least one must exist.
+     */
+    private String zkNodes = "localhost:2181";
 
     /**
      * Seed nodes for Kafka cluster. At least one must exist.
@@ -112,6 +116,19 @@ public class KafkaConnectorConfig
     public Set<HostAddress> getNodes()
     {
         return nodes;
+    }
+
+    @NotNull
+    public String getZkNodes()
+    {
+        return zkNodes;
+    }
+
+    @Config("kafka.zknodes")
+    public KafkaConnectorConfig setZkNodes(String zkNodes)
+    {
+        this.zkNodes = zkNodes;
+        return this;
     }
 
     @Config("kafka.nodes")

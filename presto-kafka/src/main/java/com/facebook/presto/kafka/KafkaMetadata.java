@@ -31,6 +31,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 
+import io.airlift.log.Logger;
+
 import javax.inject.Inject;
 
 import java.util.List;
@@ -51,10 +53,13 @@ import static java.util.Objects.requireNonNull;
 public class KafkaMetadata
         implements ConnectorMetadata
 {
+    private static final Logger log = Logger.get(KafkaMetadata.class);
+
     private final String connectorId;
     private final boolean hideInternalColumns;
-    private final Map<SchemaTableName, KafkaTopicDescription> tableDescriptions;
+    private Map<SchemaTableName, KafkaTopicDescription> tableDescriptions;
     private final Set<KafkaInternalFieldDescription> internalFieldDescriptions;
+    private Supplier<Map<SchemaTableName, KafkaTopicDescription>> mainKafkaTableDescriptionSupplier;
 
     @Inject
     public KafkaMetadata(
@@ -63,20 +68,23 @@ public class KafkaMetadata
             Supplier<Map<SchemaTableName, KafkaTopicDescription>> kafkaTableDescriptionSupplier,
             Set<KafkaInternalFieldDescription> internalFieldDescriptions)
     {
+        log.debug("In KafkaMetadata constructor..");
         this.connectorId = requireNonNull(connectorId, "connectorId is null").toString();
 
         requireNonNull(kafkaConnectorConfig, "kafkaConfig is null");
         this.hideInternalColumns = kafkaConnectorConfig.isHideInternalColumns();
-
         requireNonNull(kafkaTableDescriptionSupplier, "kafkaTableDescriptionSupplier is null");
-        this.tableDescriptions = kafkaTableDescriptionSupplier.get();
+        // this.tableDescriptions = kafkaTableDescriptionSupplier.get();
         this.internalFieldDescriptions = requireNonNull(internalFieldDescriptions, "internalFieldDescriptions is null");
+        mainKafkaTableDescriptionSupplier = kafkaTableDescriptionSupplier;
     }
 
     @Override
     public List<String> listSchemaNames(ConnectorSession session)
     {
+        log.debug("In KafkaMetadata.listSchemaNames");
         ImmutableSet.Builder<String> builder = ImmutableSet.builder();
+        Map<SchemaTableName, KafkaTopicDescription> tableDescriptions = mainKafkaTableDescriptionSupplier.get();
         for (SchemaTableName tableName : tableDescriptions.keySet()) {
             builder.add(tableName.getSchemaName());
         }
@@ -86,6 +94,8 @@ public class KafkaMetadata
     @Override
     public KafkaTableHandle getTableHandle(ConnectorSession session, SchemaTableName schemaTableName)
     {
+        log.debug("In KafkaMetadata.getTableHandle");
+        Map<SchemaTableName, KafkaTopicDescription> tableDescriptions = mainKafkaTableDescriptionSupplier.get();
         KafkaTopicDescription table = tableDescriptions.get(schemaTableName);
         if (table == null) {
             return null;
@@ -101,20 +111,26 @@ public class KafkaMetadata
 
     private static String getDataFormat(KafkaTopicFieldGroup fieldGroup)
     {
+        log.debug("In KafkaMetadata.getDataFormat");
         return (fieldGroup == null) ? DummyRowDecoder.NAME : fieldGroup.getDataFormat();
     }
 
     @Override
     public ConnectorTableMetadata getTableMetadata(ConnectorSession session, ConnectorTableHandle tableHandle)
     {
+        log.debug("In KafkaMetadata.getTableMetadata");
         return getTableMetadata(convertTableHandle(tableHandle).toSchemaTableName());
     }
 
     @Override
     public List<SchemaTableName> listTables(ConnectorSession session, String schemaNameOrNull)
     {
+        log.debug("In KafkaMetadata.listTables");
+        // Refresh table descriptions
+        Map<SchemaTableName, KafkaTopicDescription> localTableDescriptions = mainKafkaTableDescriptionSupplier.get();
+
         ImmutableList.Builder<SchemaTableName> builder = ImmutableList.builder();
-        for (SchemaTableName tableName : tableDescriptions.keySet()) {
+        for (SchemaTableName tableName : localTableDescriptions.keySet()) {
             if (schemaNameOrNull == null || tableName.getSchemaName().equals(schemaNameOrNull)) {
                 builder.add(tableName);
             }
@@ -127,7 +143,10 @@ public class KafkaMetadata
     @Override
     public Map<String, ColumnHandle> getColumnHandles(ConnectorSession session, ConnectorTableHandle tableHandle)
     {
+        log.debug("In KafkaMetadata.getColumnHandles");
         KafkaTableHandle kafkaTableHandle = convertTableHandle(tableHandle);
+
+        Map<SchemaTableName, KafkaTopicDescription> tableDescriptions = mainKafkaTableDescriptionSupplier.get();
 
         KafkaTopicDescription kafkaTopicDescription = tableDescriptions.get(kafkaTableHandle.toSchemaTableName());
         if (kafkaTopicDescription == null) {
@@ -167,6 +186,7 @@ public class KafkaMetadata
     @Override
     public Map<SchemaTableName, List<ColumnMetadata>> listTableColumns(ConnectorSession session, SchemaTablePrefix prefix)
     {
+        log.debug("In KafkaMetadata.listTableColumns");
         requireNonNull(prefix, "prefix is null");
 
         ImmutableMap.Builder<SchemaTableName, List<ColumnMetadata>> columns = ImmutableMap.builder();
@@ -186,6 +206,7 @@ public class KafkaMetadata
     @Override
     public ColumnMetadata getColumnMetadata(ConnectorSession session, ConnectorTableHandle tableHandle, ColumnHandle columnHandle)
     {
+        log.debug("In KafkaMetadata.getColumnMetadata");
         convertTableHandle(tableHandle);
         return convertColumnHandle(columnHandle).getColumnMetadata();
     }
@@ -193,6 +214,7 @@ public class KafkaMetadata
     @Override
     public List<ConnectorTableLayoutResult> getTableLayouts(ConnectorSession session, ConnectorTableHandle table, Constraint<ColumnHandle> constraint, Optional<Set<ColumnHandle>> desiredColumns)
     {
+        log.debug("In KafkaMetadata.getTableLayouts");
         KafkaTableHandle handle = convertTableHandle(table);
         ConnectorTableLayout layout = new ConnectorTableLayout(new KafkaTableLayoutHandle(handle));
         return ImmutableList.of(new ConnectorTableLayoutResult(layout, constraint.getSummary()));
@@ -201,12 +223,16 @@ public class KafkaMetadata
     @Override
     public ConnectorTableLayout getTableLayout(ConnectorSession session, ConnectorTableLayoutHandle handle)
     {
+        log.debug("In KafkaMetadata.getTableLayout");
         return new ConnectorTableLayout(handle);
     }
 
     @SuppressWarnings("ValueOfIncrementOrDecrementUsed")
     private ConnectorTableMetadata getTableMetadata(SchemaTableName schemaTableName)
     {
+        log.debug("In KafkaMetadata.getTableMetadata");
+        Map<SchemaTableName, KafkaTopicDescription> tableDescriptions = mainKafkaTableDescriptionSupplier.get();
+
         KafkaTopicDescription table = tableDescriptions.get(schemaTableName);
         if (table == null) {
             throw new TableNotFoundException(schemaTableName);

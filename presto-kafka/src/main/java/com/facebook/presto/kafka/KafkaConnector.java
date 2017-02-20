@@ -48,6 +48,7 @@ public class KafkaConnector
             KafkaSplitManager splitManager,
             KafkaRecordSetProvider recordSetProvider)
     {
+        log.debug("In KafkaConnector constructor");
         this.lifeCycleManager = requireNonNull(lifeCycleManager, "lifeCycleManager is null");
         this.metadata = requireNonNull(metadata, "metadata is null");
         this.splitManager = requireNonNull(splitManager, "splitManager is null");
@@ -64,6 +65,7 @@ public class KafkaConnector
     @Override
     public ConnectorMetadata getMetadata(ConnectorTransactionHandle transactionHandle)
     {
+        log.debug("Asking for metadata..");
         return metadata;
     }
 
